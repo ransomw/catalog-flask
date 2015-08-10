@@ -1,0 +1,9 @@
+Flask==0.10.1
+SQLAlchemy==1.0.8
+bleach==1.4.1
+oauth2client==1.4.12
+requests==2.7.0
+httplib2==0.9.1
+WTForms==2.0.2
+Flask-SeaSurf==0.2.0
+dict2xml==1.3
