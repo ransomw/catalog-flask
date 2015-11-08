@@ -36,7 +36,7 @@ from dict2xml import dict2xml
 from models import User
 from models import Category
 from models import Item
-from models import session
+from models import get_db
 
 import view_helpers as vh
 
@@ -62,7 +62,7 @@ def login():
     if request.method == 'POST':
         if request.form.get('sign-in') is not None:
             try:
-                user = session.query(User).filter_by(
+                user = get_db().query(User).filter_by(
                     email=request.form.get('email')).one()
             except NoResultFound:
                 return ("no user record found for email '%s'" %
@@ -82,7 +82,7 @@ def login():
                  request.form.get('password-confirm'))):
                 return "passwords don't match"
             try:
-                user = session.query(User).filter_by(
+                user = get_db().query(User).filter_by(
                     email=request.form.get('email')).one()
             except NoResultFound:
                 user = User(email=request.form.get('email'))
@@ -91,9 +91,9 @@ def login():
             user.password = generate_password_hash(
                 request.form.get('password'))
             user.name = request.form.get('name')
-            session.add(user)
-            session.commit()
-            user = session.query(User).filter_by(
+            get_db().add(user)
+            get_db().commit()
+            user = get_db().query(User).filter_by(
                 email=request.form.get('email')).one()
             login_session['user_id'] = user.id
         return redirect(url_for('home'))
@@ -229,9 +229,9 @@ def logout():
 
 @app.route('/')
 def home():
-    categories = session.query(Category).all()
+    categories = get_db().query(Category).all()
     # todo: most recent
-    items = session.query(Item).order_by(desc(Item.last_update))
+    items = get_db().query(Item).order_by(desc(Item.last_update))
     return render_template('home.html',
                            session=login_session,
                            categories=categories,
@@ -260,7 +260,7 @@ def item_new():
             return file_storage_err
         return redirect(url_for('home'))
     else:
-        categories = session.query(Category).all()
+        categories = get_db().query(Category).all()
         return render_template('item_add.html',
                                categories=categories)
 
@@ -268,15 +268,15 @@ def item_new():
 @app.route('/catalog/<string:item_title>/edit', methods=['GET', 'POST'])
 @login_required
 def item_edit(item_title):
-    categories = session.query(Category).all()
-    item = session.query(Item).filter_by(
+    categories = get_db().query(Category).all()
+    item = get_db().query(Item).filter_by(
         title=item_title).one()
-    user = session.query(User).filter_by(
+    user = get_db().query(User).filter_by(
         id=login_session.get('user_id')).one()
     if item.user is not None and item.user.id != user.id:
         return redirect(url_for('home'))
     if request.method == 'POST':
-        form = vh.ItemForm(request.form, item)
+        form = vh.get_item_form()(request.form, item)
         file_storage_err = vh.store_item_pic(
             item, request.files['picture'])
         if (not form.validate() or file_storage_err is not None):
@@ -285,8 +285,8 @@ def item_edit(item_title):
                                    file_err=file_storage_err)
         form.populate_obj(item)
         try:
-            session.add(item)
-            session.commit()
+            get_db().add(item)
+            get_db().commit()
         except ValueError as e:
             return "Database validation error: " + str(e)
         except SQLAlchemyError as e:
@@ -295,7 +295,7 @@ def item_edit(item_title):
             return "Database error: " + str(e)
         return redirect(url_for('home'))
     else:
-        form = vh.ItemForm(obj=item)
+        form = vh.get_item_form()(obj=item)
         return render_template('item_edit.html',
                                form=form,
                                file_err=None)
@@ -305,9 +305,9 @@ def item_edit(item_title):
            methods=['GET', 'POST'])
 @login_required
 def item_delete(item_title):
-    item = session.query(Item).filter_by(
+    item = get_db().query(Item).filter_by(
         title=item_title).one()
-    user = session.query(User).filter_by(
+    user = get_db().query(User).filter_by(
         id=login_session.get('user_id')).one()
     if item.user is not None and item.user.id != user.id:
         return redirect(url_for('home'))
@@ -315,8 +315,8 @@ def item_delete(item_title):
         img_filepath = vh.get_item_image_filepath(item.id)
         if os.path.isfile(img_filepath):
             os.remove(img_filepath)
-        session.delete(item)
-        session.commit()
+        get_db().delete(item)
+        get_db().commit()
         return redirect(url_for('home'))
     else:
         return render_template('item_delete.html',
@@ -325,10 +325,10 @@ def item_delete(item_title):
 
 @app.route('/catalog/<string:category_name>/items')
 def items_list(category_name):
-    category = session.query(Category).filter_by(
+    category = get_db().query(Category).filter_by(
         name=category_name).one()
-    categories = session.query(Category).all()
-    items = session.query(Item).filter_by(
+    categories = get_db().query(Category).all()
+    items = get_db().query(Item).filter_by(
         category_id=category.id).all()
     return render_template('items.html',
                            session=login_session,
@@ -339,9 +339,10 @@ def items_list(category_name):
 
 @app.route('/catalog/<string:category_name>/<string:item_title>')
 def item_detail(category_name, item_title):
-    category = session.query(Category).filter_by(
+    # todo: 404 on error from .one()
+    category = get_db().query(Category).filter_by(
         name=category_name).one()
-    item = session.query(Item).filter_by(
+    item = get_db().query(Item).filter_by(
         category_id=category.id).filter_by(
             title=item_title).one()
     has_img = vh.get_item_image_info(item.id) is not None
@@ -358,7 +359,7 @@ def item_detail(category_name, item_title):
 @app.route('/catalog/item/<int:item_id>/img')
 def item_img(item_id):
     try:
-        item = session.query(Item).filter_by(
+        item = get_db().query(Item).filter_by(
             id=item_id).one()
     except NoResultFound:
         return make_response(
@@ -373,14 +374,14 @@ def item_img(item_id):
 
 @app.route('/api/category')
 def api_categories():
-    categories = session.query(Category).all()
+    categories = get_db().query(Category).all()
     return jsonify(Categories=[c.serialize for c in categories])
 
 
 @app.route('/api/item')
 def api_items():
     print "top of api_items"
-    items = session.query(Item).all()
+    items = get_db().query(Item).all()
     return jsonify(Items=[i.serialize for i in items])
 
 

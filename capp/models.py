@@ -1,3 +1,5 @@
+from pdb import set_trace as st
+
 from sqlalchemy import Column
 from sqlalchemy import ForeignKey
 from sqlalchemy import Integer
@@ -14,6 +16,10 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.orm import validates
 
 from sqlalchemy import create_engine
+
+from flask import g
+
+from capp import app
 
 Base = declarative_base()
 
@@ -79,17 +85,21 @@ class Item(Base):
             'title': self.title,
         }
 
-engine = create_engine(
-    'sqlite:///catalogapp.db')
+def _connect_db():
+    """ return a new sqlalchemy session """
+    engine = create_engine(
+        'sqlite:///' + app.config['DATABASE'])
+    Base.metadata.create_all(engine)
+    # todo: what happens when session
+    #       gets disconnected or has a transaction to be rolled back?
+    Base.metadata.bind = engine
+    DBSession = sessionmaker(bind=engine)
+    return DBSession()
 
-Base.metadata.create_all(engine)
+def get_db():
+    if not hasattr(g, 'db_session'):
+        g.db_session = _connect_db()
+    return g.db_session
 
-# ??? is it appropriate to initialize a DB session here?
-# I want to use the same session in both the view and view_helper
-# modules but avoid circular imports
-# todo: must figure out some other way to manage session
-#       in order to avoid application crashes when session
-#       gets disconnected or has a transaction to be rolled back
-Base.metadata.bind = engine
-DBSession = sessionmaker(bind=engine)
-session = DBSession()
+
+# session = connect_db()

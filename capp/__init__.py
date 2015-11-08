@@ -17,3 +17,6 @@ csrf = SeaSurf(app)
 # although a pep8 violation, this is recommended at
 # http://flask.pocoo.org/docs/0.10/patterns/packages/
 import capp.views
+from lotsofitems import lots_of_items as initdb
+
+

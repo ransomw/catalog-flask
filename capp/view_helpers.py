@@ -6,7 +6,7 @@ import imghdr
 from wtforms.ext.sqlalchemy.orm import model_form
 from wtforms.validators import ValidationError
 
-from models import session
+from models import get_db
 from models import Category
 from models import User
 from models import Item
@@ -17,15 +17,15 @@ from capp import app
 def get_create_user(name, email):
     """ get or create user record """
     try:
-        user = session.query(User).filter_by(
+        user = get_db().query(User).filter_by(
             email=email).one()
     # todo: catch specific sqlalchemy exception
     except:
         new_user = User(name=name,
                         email=email)
-        session.add(new_user)
-        session.commit()
-        user = session.query(User).filter_by(
+        get_db().add(new_user)
+        get_db().commit()
+        user = get_db().query(User).filter_by(
             email=email).one()
     return user.id
 
@@ -38,10 +38,10 @@ def item_from_form(item, form, user_id=None,
     if user_id is not None:
         item.user_id = user_id
     if save:
-        session.add(item)
-        session.commit()
+        get_db().add(item)
+        get_db().commit()
     # query in order to have id set
-    return session.query(Item).filter_by(
+    return get_db().query(Item).filter_by(
         title=form['title']).one()
 
 
@@ -87,10 +87,10 @@ def store_item_pic(item, file_storage_pic):
 
 
 def serialize_catalog():
-    categories = session.query(Category).all()
+    categories = get_db().query(Category).all()
     categories_json = [c.serialize for c in categories]
     for category_json in categories_json:
-        items = session.query(Item).filter_by(
+        items = get_db().query(Item).filter_by(
             category_id=category_json['id']).all()
         if len(items) > 0:
             category_json['Item'] = [
@@ -111,15 +111,16 @@ class NotBlank(object):
                 "{label} may not be blank"
                 ).format(label=field.label.text))
 
-ItemForm = model_form(
-    Item,
-    db_session=session,
-    only=[
-        'title',
-        'description',
-        'category',
-    ],
-    # ??? duplicate validation ok?
-    field_args={
-        'description': {'validators': [NotBlank(), ], },
-    })
+def get_item_form():
+    return model_form(
+        Item,
+        db_session=get_db(),
+        only=[
+            'title',
+            'description',
+            'category',
+        ],
+        # ??? duplicate validation ok?
+        field_args={
+            'description': {'validators': [NotBlank(), ], },
+        })
