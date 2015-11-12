@@ -11,8 +11,9 @@ from bs4 import BeautifulSoup
 from capp import app
 from capp import initdb
 
-from test.pages import HomePage
 from test.pages import arr_elem
+from test.pages import HomePage
+from test.pages import ItemsPage
 
 ## debug util functions
 
@@ -49,8 +50,26 @@ class BaseTestCase(unittest.TestCase):
         self.assertEqual(resp.status_code, 200)
         return bs(resp.data)
 
+    def get_home_page(self):
+        return HomePage(self._get_page_soup('/'), self)
 
-class NoLoginTests(BaseTestCase):
+
+class NavMixin(BaseTestCase):
+
+    def _test_nav(self, page):
+        self.assertEqual(page.brand,
+                         'Catalog App')
+        page.login_url
+
+
+class CatsMixin(BaseTestCase):
+
+    def _test_cats(self, page):
+        self.assertEqual(set(self.CATS),
+                         set([cat['name'] for cat in page.cats]))
+
+
+class NoLoginTests(NavMixin, CatsMixin, BaseTestCase):
 
     CATS = [
         "Soccer",
@@ -94,17 +113,11 @@ class NoLoginTests(BaseTestCase):
          'cat': "Soccer"},
     ]
 
-    def test_get_home(self):
-        self._get_page_soup('/')
-
     def test_home(self):
-        soup = self._get_page_soup('/')
-        page = HomePage(soup, self)
-        self.assertEqual(page.brand(),
-                         'Catalog App')
-        self.assertEqual(set(self.CATS),
-                         set([cat['name'] for cat in page.get_cats()]))
-        items = page.get_items()
+        page = self.get_home_page()
+        self._test_nav(page)
+        self._test_cats(page)
+        items = page.items
         self.assertEqual(set([i['title'] for i in self.ITEMS]),
                          set([i['title'] for i in items]))
         for curr_item in items:
@@ -113,8 +126,32 @@ class NoLoginTests(BaseTestCase):
                 [i for i in self.ITEMS
                  if i['title'] == curr_item['title']])
             self.assertEqual(expected_item['cat'], curr_item['cat'])
-        page.get_login_url()
 
+    def test_items(self):
+        home_page = self.get_home_page()
+        for cat in home_page.cats:
+            items_page = ItemsPage(
+                self._get_page_soup(cat['url']), self)
+            self._test_nav(items_page)
+            self._test_cats(items_page)
+            expected_item_titles = [
+                item['title']
+                for item in self.ITEMS
+                if item['cat'] == cat['name']]
+            self.assertEqual(
+                set(expected_item_titles),
+                set([item['title'] for item in
+                     items_page.items])
+                ,msg="items page for category "+cat['name']
+            )
+            self.assertEqual(
+                items_page.item_list_header_text,
+                ''.join([cat['name'], " Items (",
+                         str(len(expected_item_titles)), " items)"]))
+
+
+        # page = ItemsPage(HomePage(
+        #     self.get_home_page().login_url)
 
 
 if __name__ == '__main__':

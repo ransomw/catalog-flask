@@ -58,32 +58,63 @@ class PageObject(AssertionMixin, object):
         return self._arr_elem(self.tags_with_text(tag_re, text_re))
 
 
-class HomePage(PageObject):
+class NavPage(PageObject):
+    """ page containing the nav bar """
+
+    @property
+    def brand(self):
+        brand_tag = self.class_tag('navbar-brand')
+        return brand_tag.text.strip()
+
+    @property
+    def login_url(self):
+        return self.tag_with_text(r'^a$', r'^Login$')
+
+class CatsPage(PageObject):
 
     def _cats_div(self):
         elem = self.tag_with_text(r'^h.', r'^Categories$').parent
         self.assertEqual(elem.name, 'div')
         return elem
 
+    @property
+    def cats(self):
+        return [{'name': tag.text.strip(),
+                 'url': tag.attrs['href']}
+                for tag in self._cats_div().find_all('a')]
+
+
+class HomePage(NavPage, CatsPage, PageObject):
+
     def _items_div(self):
         elem = self.tag_with_text(r'^h.', r'^Latest Items$').parent
         self.assertEqual(elem.name, 'div')
         return elem
 
-    def brand(self):
-        brand_tag = self.class_tag('navbar-brand')
-        return brand_tag.text.strip()
-
-    def get_cats(self):
-        return [{'name': tag.text.strip(),
-                 'url': tag.attrs['href']}
-                for tag in self._cats_div().find_all('a')]
-
-    def get_items(self):
+    @property
+    def items(self):
         return [{'title': tag.a.text.strip(),
                  'cat': tag.span.text.strip().strip('()'),
                  'url': tag.a.attrs['href']}
                 for tag in self._items_div().find_all('li')]
 
-    def get_login_url(self):
-        return self.tag_with_text(r'^a$', r'^Login$')
+
+class ItemsPage(NavPage, CatsPage, PageObject):
+
+    def _items_h(self):
+        return self.tag_with_text(r'^h.$', r'.*Items')
+
+    def _items_div(self):
+        elem = self._items_h().parent
+        self.assertEqual(elem.name, 'div')
+        return elem
+
+    @property
+    def items(self):
+        return [{'title': tag.a.text.strip(),
+                 'url': tag.a.attrs['href']}
+                for tag in self._items_div().find_all('li')]
+
+    @property
+    def item_list_header_text(self):
+        return self._items_h().text
