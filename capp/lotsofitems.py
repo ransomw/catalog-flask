@@ -1,5 +1,3 @@
-from sqlalchemy.orm import sessionmaker
-
 from models import get_db
 from models import Base
 from models import User
@@ -101,7 +99,6 @@ def lots_of_items():
     session.add(item)
     session.commit()
 
-    print "populated database with sample data"
 
 if __name__ == '__main__':
     lots_of_items()

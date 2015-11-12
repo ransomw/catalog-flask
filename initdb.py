@@ -7,4 +7,4 @@ import capp
 with capp.app.app_context():
     capp.initdb()
 
-
+print "populated database with sample data"
