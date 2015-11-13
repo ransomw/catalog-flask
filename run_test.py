@@ -7,6 +7,7 @@ import tempfile
 import re
 import random
 from urlparse import urlparse
+from StringIO import StringIO
 
 from bs4 import BeautifulSoup
 
@@ -17,6 +18,10 @@ from test.pages import arr_elem
 from test.pages import HomePage
 from test.pages import ItemsPage
 from test.pages import ItemPage
+from test.pages import LoginPage
+from test.pages import CreatePage
+from test.pages import EditPage
+from test.pages import DeletePage
 
 ## debug util functions
 
@@ -31,6 +36,7 @@ def gmn(obj, all=False):
 def bs(html_str):
     return BeautifulSoup(html_str, 'html5lib')
 
+########################
 ## test cases
 
 class BaseTestCase(unittest.TestCase):
@@ -168,6 +174,171 @@ class NoLoginTests(NavMixin, CatsMixin, BaseTestCase):
             self.assertEqual(resp.status_code, 302)
             self.assertEqual(urlparse(resp.location).path,
                              rand_page.login_url)
+
+
+# todo: test g+ and github logins
+#       consider defining all functionality in terms of mixins,
+#       one for each type of login and one for the tests,
+#       then defining three tests classes by combining
+#       each login mixin with the test mixin
+#    ...even though even this won't cover the case where a name and email
+#    are manually added to an account between some of the tests
+
+
+class LoginMixin(BaseTestCase):
+
+    EMAIL = 'a@a.org'
+    PASS = 'password'
+    NAME = 'alice'
+
+    def sign_up(self, url):
+        page = LoginPage(self._get_page_soup(url), self)
+        form_dict = page.form_dict
+        form_dict.update({
+            'sign-up': '',
+            'password': self.PASS,
+            'email': self.EMAIL,
+            'password-confirm': self.PASS,
+            # todo: omitting the name param is a good way to make the
+            #       database crash
+            'name': self.NAME,
+        })
+        resp = self.c.post(url,
+                           data=form_dict.post_dict,
+                           follow_redirects=True)
+        self.assertEqual(resp.status_code, 200)
+
+    def login(self, url):
+        page = LoginPage(self._get_page_soup(url), self)
+        form_dict = page.form_dict
+        form_dict.update({
+            'sign-in': '',
+            'password': self.PASS,
+            'email': self.EMAIL,
+        })
+        resp = self.c.post(url,
+                           data=form_dict.post_dict,
+                           follow_redirects=True)
+        self.assertEqual(resp.status_code, 200)
+
+    def sign_up_login(self, url):
+        self.sign_up(url)
+        self.login(url)
+
+    def logout(self, nav_page):
+        resp = self.c.get(nav_page.logout_url, follow_redirects=True)
+        self.assertEqual(resp.status_code, 200)
+
+
+class LoginTests(LoginMixin, NavMixin, CatsMixin, BaseTestCase):
+
+    def test_login(self):
+        self.sign_up_login(self.get_home_page().login_url)
+        self.logout(self.get_home_page())
+        self.get_home_page().login_url
+
+# todo: tests via database api
+
+class CrudTests(LoginMixin, NavMixin, CatsMixin, BaseTestCase):
+
+    ITEM = {
+        'title': "Ball",
+        'description': "World Cup 2014 edition",
+        'cat': "Soccer",
+    }
+
+    # todo: avoid duplicate item titles
+    #       changing 'title' to 'Stick' leads to weird errors
+    ITEM_UPDATE = {
+        'title': "Russian hockey stick",
+        'description': "infested with termites (a-la The Simspons)",
+        'cat': "Hockey"
+    }
+
+
+    def setUp(self):
+        super(CrudTests, self).setUp()
+        # set picture here, or else
+        # ValueError: I/O operation on closed file
+        # occurs when _create() is run more than once
+        # not posting an empty picture string leads to 400 error
+        # change StringIO to ByteIO for python3 (?)
+        # the second elem in the tuple is the filename
+        self.ITEM['picture'] = (StringIO(''), '')
+        self.ITEM_UPDATE['picture'] = (StringIO(''), '')
+
+    def _update_item_form_dict(self, form_dict, update_vals):
+        # todo: edit FormDict to make the following cleaner
+        #       ideally, a single .update() would suffice
+        form_dict['category'].selected = update_vals['cat']
+        item_dict = dict(update_vals)
+        item_dict.pop('cat')
+        form_dict.update(item_dict)
+
+    def _create(self):
+        self.sign_up_login(self.get_home_page().login_url)
+        create_url = self.get_home_page().create_url
+        page = CreatePage(self._get_page_soup(create_url), self)
+        form_dict = page.form_dict
+        self._update_item_form_dict(form_dict, self.ITEM)
+        resp = self.c.post(create_url,
+                           data=form_dict.post_dict,
+                           follow_redirects=True,
+                           content_type=form_dict.content_type)
+        self.assertEqual(resp.status_code, 200)
+
+    def test_create(self):
+        self._create()
+
+    def _get_item_page(self, item_title):
+        item_url = arr_elem(
+            self.assertEqual,
+            [i['url'] for i in self.get_home_page().items
+             if i['title'] == item_title])
+        return ItemPage(self._get_page_soup(item_url), self)
+
+    def _test_read(self, expected_vals):
+        item_page = self._get_item_page(expected_vals['title'])
+        # todo: check item category
+        #       while removing duplicate code from NoLoginTest
+        self.assertEqual(item_page.title, expected_vals['title'])
+        self.assertEqual(item_page.description,
+                         expected_vals['description'])
+
+    def test_read(self):
+        self._create()
+        self._test_read(self.ITEM)
+
+    def test_update(self):
+        self._create()
+        item_page = self._get_item_page(self.ITEM['title'])
+        edit_url = item_page.edit_url
+        edit_page = EditPage(
+            self._get_page_soup(edit_url), self)
+        form_dict = edit_page.form_dict
+        self._update_item_form_dict(form_dict, self.ITEM_UPDATE)
+        resp = self.c.post(edit_url,
+                           data=form_dict.post_dict,
+                           follow_redirects=True,
+                           content_type=form_dict.content_type)
+        self.assertEqual(resp.status_code, 200)
+        self._test_read(self.ITEM_UPDATE)
+
+    def test_delete(self):
+        self._create()
+        self.assertEqual(len([i for i in self.get_home_page().items
+                              if i['title'] == self.ITEM['title']]), 1)
+        item_page = self._get_item_page(self.ITEM['title'])
+        delete_url = item_page.delete_url
+        delete_page = DeletePage(
+            self._get_page_soup(delete_url), self)
+        form_dict = delete_page.form_dict
+        resp = self.c.post(delete_url,
+                           data=delete_page.form_dict.post_dict,
+                           follow_redirects=True)
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual([i for i in self.get_home_page().items
+                          if i['title'] == self.ITEM['title']], [])
 
 
 if __name__ == '__main__':
