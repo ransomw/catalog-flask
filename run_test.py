@@ -5,6 +5,8 @@ import unittest
 import os
 import tempfile
 import re
+import random
+from urlparse import urlparse
 
 from bs4 import BeautifulSoup
 
@@ -14,6 +16,7 @@ from capp import initdb
 from test.pages import arr_elem
 from test.pages import HomePage
 from test.pages import ItemsPage
+from test.pages import ItemPage
 
 ## debug util functions
 
@@ -149,9 +152,22 @@ class NoLoginTests(NavMixin, CatsMixin, BaseTestCase):
                 ''.join([cat['name'], " Items (",
                          str(len(expected_item_titles)), " items)"]))
 
-
-        # page = ItemsPage(HomePage(
-        #     self.get_home_page().login_url)
+    def test_item_pages(self):
+        item_pages = [ItemPage(self._get_page_soup(i['url']), self)
+                      for i in self.get_home_page().items]
+        self.assertEqual(len(item_pages), len(self.ITEMS))
+        for page in item_pages:
+            expected_description = arr_elem(
+                self.assertEqual,
+                [i['description'] for i in self.ITEMS
+                 if i['title'] == page.title])
+            self.assertEqual(page.description, expected_description)
+        rand_page = random.sample(item_pages, 1)[0]
+        for url in [rand_page.edit_url, rand_page.delete_url]:
+            resp = self.c.get(url)
+            self.assertEqual(resp.status_code, 302)
+            self.assertEqual(urlparse(resp.location).path,
+                             rand_page.login_url)
 
 
 if __name__ == '__main__':

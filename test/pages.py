@@ -1,5 +1,7 @@
 """ Page objects (http://martinfowler.com/bliki/PageObject.html) """
 
+from pdb import set_trace as st
+
 import re
 
 def arr_elem(assert_equal, arr):
@@ -68,7 +70,7 @@ class NavPage(PageObject):
 
     @property
     def login_url(self):
-        return self.tag_with_text(r'^a$', r'^Login$')
+        return self.tag_with_text(r'^a$', r'^Login$').attrs['href']
 
 class CatsPage(PageObject):
 
@@ -118,3 +120,29 @@ class ItemsPage(NavPage, CatsPage, PageObject):
     @property
     def item_list_header_text(self):
         return self._items_h().text
+
+
+class ItemPage(NavPage, PageObject):
+
+    def _get_main_div(self):
+        return  self.soup.h3.parent
+
+    @property
+    def title(self):
+        return self._get_main_div().h3.text.strip()
+
+    @property
+    def description(self):
+        desc_text = self._get_main_div().p.text.strip()
+        desc_match = re.match(r'Description: (.*)', desc_text)
+        self.assertTrue(desc_match is not None)
+        # group(0) is entire string
+        return desc_match.group(1)
+
+    @property
+    def edit_url(self):
+        return self.tag_with_text(r'^a$', r'^Edit$').attrs['href']
+
+    @property
+    def delete_url(self):
+        return self.tag_with_text(r'^a$', r'^Delete$').attrs['href']
