@@ -19,6 +19,7 @@ from flask import redirect
 from flask import url_for
 from flask import jsonify
 from flask import send_file
+from flask import g
 
 from sqlalchemy import asc
 from sqlalchemy import desc
@@ -46,13 +47,14 @@ from capp import csrf
 G_CLIENT_ID = json.loads(
     open('client_secrets.json', 'r').read())['web']['client_id']
 
-NUM_RECENT_ITEMS=9
+NUM_RECENT_ITEMS = 9
+
+# todo: currently have urls like Soccer%20Cleats, which is ugly
 
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
-        user_id = login_session.get('user_id')
-        if user_id is None:
+        if 'user_id' not in login_session:
             return redirect(url_for('login', next=request.url))
         return f(*args, **kwargs)
     return decorated_function
@@ -66,29 +68,42 @@ def login():
                 user = get_db().query(User).filter_by(
                     email=request.form.get('email')).one()
             except NoResultFound:
-                return ("no user record found for email '%s'" %
-                        request.form.get('email'))
+                err_msg = ("no user record found for email '%s'" %
+                           request.form.get('email'))
+                return render_template(
+                    'err.html', err_msg=err_msg), 401
             if user.password is None:
-                return ("user account created with third-party service"
-                        "<br>"
-                        "sign up locally or sign in with third-party")
+                err_msg = ("User account created with third-party"
+                           "service.  Sign up locally"
+                           " or sign in with third-party.")
+                return render_template(
+                    'err.html', err_msg=err_msg), 401
             if check_password_hash(user.password,
                                    request.form.get('password')):
                 login_session['user_id'] = user.id
             else:
-                return "bad password"
+                return render_template(
+                    'err.html', err_msg="bad password"), 401
         else:
-            # request.form.get('sign-up') is not None
+            # request.form.get('sign-in') is None
+            if request.form.get('sign-up') is None:
+                err_msg = "must specify sign up or sign in"
+                return render_template(
+                    'err.html', err_msg=err_msg), 400
             if ((request.form.get('password') !=
                  request.form.get('password-confirm'))):
-                return "passwords don't match"
+                err_msg = "passwords don't match"
+                return render_template(
+                    'err.html', err_msg=err_msg), 400
             try:
                 user = get_db().query(User).filter_by(
                     email=request.form.get('email')).one()
             except NoResultFound:
                 user = User(email=request.form.get('email'))
             if user.password is not None:
-                return "user already registered"
+                err_msg = "user already registered"
+                return render_template(
+                    'err.html', err_msg=err_msg), 401
             user.password = generate_password_hash(
                 request.form.get('password'))
             user.name = request.form.get('name')
@@ -99,10 +114,10 @@ def login():
             login_session['user_id'] = user.id
         return redirect(url_for('home'))
     else:
+        # request.method != 'POST'
         state = ''.join(
             random.choice(string.ascii_uppercase + string.digits)
-            for _ in range(32)
-        )
+            for _ in range(32))
         login_session['state'] = state
         return render_template(
             'login.html',
@@ -112,10 +127,10 @@ def login():
 
 
 # disable for production, used only for dev w/o internet connection
-@app.route('/login/<int:user_id>')
-def login_testing(user_id):
-    login_session['user_id'] = user_id
-    return redirect(url_for('home'))
+# @app.route('/login/<int:user_id>')
+# def login_testing(user_id):
+#     login_session['user_id'] = user_id
+#     return redirect(url_for('home'))
 
 
 @app.route('/login/github')
@@ -228,13 +243,20 @@ def logout():
     return redirect(url_for('home'))
 
 
+@app.before_request
+def before_request():
+    g.user = None
+    if 'user_id' in login_session:
+        g.user = get_db().query(User).filter_by(
+            id=login_session.get('user_id')).one()
+
+
 @app.route('/')
 def home():
     categories = get_db().query(Category).all()
     items = get_db().query(
         Item).order_by(desc(Item.last_update)).limit(NUM_RECENT_ITEMS)
     return render_template('home.html',
-                           session=login_session,
                            categories=categories,
                            items=items)
 
@@ -245,10 +267,10 @@ def item_new():
     if request.method == 'POST':
         # store form data
         try:
-            item = vh.item_from_form(
-                Item(), request.form,
-                user_id=login_session.get('user_id'))
+            item = vh.item_from_form(Item(), request.form,
+                                     user_id=g.user.id)
         except ValueError as e:
+            # client-side validation should prevent this
             app.logger.exception(e)
             return render_template('err.html',
                                    err_msg="Database validation error")
@@ -261,7 +283,11 @@ def item_new():
         file_storage_err = vh.store_item_pic(
             item, request.files['picture'])
         if file_storage_err is not None:
-            return file_storage_err
+            # todo: what if item delete after failed pic storage fails?
+            # using wtfform in item_add.html would simplify all this
+            get_db().delete(item)
+            return render_template(
+                'err.html', err_msg=file_storage_err), 500
         return redirect(url_for('home'))
     else:
         categories = get_db().query(Category).all()
@@ -272,27 +298,37 @@ def item_new():
 @app.route('/catalog/<string:item_title>/edit', methods=['GET', 'POST'])
 @login_required
 def item_edit(item_title):
-    categories = get_db().query(Category).all()
-    item = get_db().query(Item).filter_by(
-        title=item_title).one()
-    user = get_db().query(User).filter_by(
-        id=login_session.get('user_id')).one()
-    if item.user is not None and item.user.id != user.id:
-        return redirect(url_for('home'))
+    try:
+        item = get_db().query(Item).filter_by(
+            title=item_title).one()
+    except NoResultFound:
+        err_msg = "item '" + item_title + "' not found"
+        return render_template(
+            'err.html', err_msg=err_msg), 404
+    if item.user is not None and item.user.id != g.user.id:
+        err_msg = "user doesn't have edit permissions for this item"
+        return render_template(
+            'err.html', err_msg=err_msg), 404
     if request.method == 'POST':
         form = vh.get_item_form()(request.form, item)
         file_storage_err = vh.store_item_pic(
             item, request.files['picture'])
         if (not form.validate() or file_storage_err is not None):
-            return render_template('item_edit.html',
-                                   form=form,
-                                   file_err=file_storage_err)
+            http_err_code = 500 if file_storage_err is not None else 400
+            return (render_template('item_edit.html',
+                                    form=form,
+                                    file_err=file_storage_err),
+                    http_err_code)
         form.populate_obj(item)
         try:
             get_db().add(item)
             get_db().commit()
+            # todo: pic updated w/o updating item record
         except ValueError as e:
-            return "Database validation error: " + str(e)
+            # client-side validation should prevent this
+            app.logger.exception(e)
+            return render_template('err.html',
+                                   err_msg="Database validation error")
         except SQLAlchemyError as e:
             app.logger.exception(e)
             # todo: reinitialize db connection if necessary
@@ -310,14 +346,18 @@ def item_edit(item_title):
            methods=['GET', 'POST'])
 @login_required
 def item_delete(item_title):
-    item = get_db().query(Item).filter_by(
-        title=item_title).one()
-    user = get_db().query(User).filter_by(
-        id=login_session.get('user_id')).one()
-    if item.user is not None and item.user.id != user.id:
+    try:
+        item = get_db().query(Item).filter_by(
+            title=item_title).one()
+    except NoResultFound:
+        err_msg = "item '" + item_title + "' not found"
+        return render_template(
+            'err.html', err_msg=err_msg), 404
+    if item.user is not None and item.user.id != g.user.id:
         return redirect(url_for('home'))
     if request.method == 'POST':
         img_filepath = vh.get_item_image_filepath(item.id)
+        # todo: error-handling, filesystem/db consistency story as w/ C&U
         if os.path.isfile(img_filepath):
             os.remove(img_filepath)
         get_db().delete(item)
@@ -330,13 +370,17 @@ def item_delete(item_title):
 
 @app.route('/catalog/<string:category_name>/items')
 def items_list(category_name):
-    category = get_db().query(Category).filter_by(
-        name=category_name).one()
+    try:
+        category = get_db().query(Category).filter_by(
+            name=category_name).one()
+    except NoResultFound:
+        err_msg = "category '" + category_name + "' not found"
+        return render_template(
+            'err.html', err_msg=err_msg), 404
     categories = get_db().query(Category).all()
     items = get_db().query(Item).filter_by(
         category_id=category.id).all()
     return render_template('items.html',
-                           session=login_session,
                            categories=categories,
                            category=category,
                            items=items)
@@ -344,16 +388,21 @@ def items_list(category_name):
 
 @app.route('/catalog/<string:category_name>/<string:item_title>')
 def item_detail(category_name, item_title):
-    category = get_db().query(Category).filter_by(
-        name=category_name).one()
+    try:
+        category = get_db().query(Category).filter_by(
+            name=category_name).one()
+    except NoResultFound:
+        # return tuples automatically passed flask.make_response
+        err_msg = "category '" + category_name + "' not found"
+        return render_template(
+            'err.html', err_msg=err_msg), 404
     item = get_db().query(Item).filter_by(
         category_id=category.id).filter_by(
             title=item_title).one()
     has_img = vh.get_item_image_info(item.id) is not None
-    can_modify = (item.user is None or
-                  item.user.id == login_session.get('user_id'))
+    can_modify = (g.user is not None and
+                  (item.user is None or item.user.id == g.user.id))
     return render_template('item.html',
-                           session=login_session,
                            item=item,
                            has_img=has_img,
                            can_modify=can_modify,
@@ -366,12 +415,12 @@ def item_img(item_id):
         item = get_db().query(Item).filter_by(
             id=item_id).one()
     except NoResultFound:
-        return make_response(
-            json.dumps('Image not found'),
-            401)
+        return json.dumps('Image not found'), 401
     img_info = vh.get_item_image_info(item.id)
     if img_info is None:
-        raise Exception("programming or operation error")
+        app.logger.exception("got None for img_info")
+        return json.dumps("programming or operation error"), 500
+    # todo: edit out this '..' nonsense after tests for file uploading
     return send_file(os.path.join('..', img_info['path']),
                      mimetype='image/'+img_info['type'])
 
@@ -384,7 +433,6 @@ def api_categories():
 
 @app.route('/api/item')
 def api_items():
-    print "top of api_items"
     items = get_db().query(Item).all()
     return jsonify(Items=[i.serialize for i in items])
 

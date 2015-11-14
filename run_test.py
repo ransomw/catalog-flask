@@ -168,13 +168,8 @@ class NoLoginTests(NavMixin, CatsMixin, BaseTestCase):
                 [i['description'] for i in self.ITEMS
                  if i['title'] == page.title])
             self.assertEqual(page.description, expected_description)
-        rand_page = random.sample(item_pages, 1)[0]
-        for url in [rand_page.edit_url, rand_page.delete_url]:
-            resp = self.c.get(url)
-            self.assertEqual(resp.status_code, 302)
-            self.assertEqual(urlparse(resp.location).path,
-                             rand_page.login_url)
-
+            self.assertFalse(page.has_edit_link())
+            self.assertFalse(page.has_delete_link())
 
 # todo: test g+ and github logins
 #       consider defining all functionality in terms of mixins,

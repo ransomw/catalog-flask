@@ -1,6 +1,6 @@
 {% extends "lists.html" %}
 {% block items %}
-{% if session.user_id %}
+{% if g.user %}
 <a class="body-bold" href="{{url_for('item_new')}}">
   Add item
 </a>

@@ -6,6 +6,8 @@ import imghdr
 from wtforms.ext.sqlalchemy.orm import model_form
 from wtforms.validators import ValidationError
 
+from sqlalchemy.orm.exc import NoResultFound
+
 from models import get_db
 from models import Category
 from models import User
@@ -19,8 +21,7 @@ def get_create_user(name, email):
     try:
         user = get_db().query(User).filter_by(
             email=email).one()
-    # todo: catch specific sqlalchemy exception
-    except:
+    except NoResultFound:
         new_user = User(name=name,
                         email=email)
         get_db().add(new_user)
@@ -30,6 +31,7 @@ def get_create_user(name, email):
     return user.id
 
 
+# todo: remove after using wtform in item_new view
 def item_from_form(item, form, user_id=None,
                    save=True):
     item.title = form['title']
@@ -75,14 +77,13 @@ def store_item_pic(item, file_storage_pic):
         file_type = imghdr.what(file_path)
         if file_type is None:
             os.remove(file_type)
-            return ("form data stored, but "
-                    "uploaded file was not an image")
+            return "uploaded file was not an image"
         if file_type not in app.config['ITEM_IMG_EXTS']:
             os.remove(file_type)
-            return ("form data stored, but "
-                    "uploaded file was not one of "
+            return ("uploaded file was not one of "
                     "the supported types: ") + ', '.join(
                         app.config['ITEM_IMG_EXTS'])
+    # todo: handle case filename is '', FileStorage data is not empty
     return None
 
 

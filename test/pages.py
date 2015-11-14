@@ -245,6 +245,12 @@ class ItemPage(NavPage, PageObject):
     def delete_url(self):
         return self.tag_with_text(r'^a$', r'^Delete$').attrs['href']
 
+    def has_edit_link(self):
+        return len(self.tags_with_text(r'^a$', r'^Edit$')) != 0
+
+    def has_delete_link(self):
+        return len(self.tags_with_text(r'^a$', r'^Delete$')) != 0
+
 
 class LoginPage(PageObject):
 

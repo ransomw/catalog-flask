@@ -17,7 +17,8 @@ from sqlalchemy.orm import validates
 
 from sqlalchemy import create_engine
 
-from flask import g
+# despite underscore, this is a documented instance
+from flask import _app_ctx_stack
 
 from capp import app
 
@@ -37,6 +38,7 @@ class Category(Base):
     __tablename__ = 'category'
     id = Column(
         Integer, primary_key=True)
+    # must be unique due to url scheme
     name = Column(
         String(80), nullable=False, unique=True)
     items = relationship("Item", cascade="delete")
@@ -58,8 +60,7 @@ class Item(Base):
         Integer, primary_key=True)
     # must be unique due to url scheme for edit/delete
     title = Column(String(80), unique=True)
-    # todo: use Text type
-    description = Column(String(250))
+    description = Column(Text())
     category_id = Column(
         Integer, ForeignKey('category.id'), nullable=False)
     category = relationship(Category)
@@ -97,9 +98,14 @@ def _connect_db():
     return DBSession()
 
 def get_db():
-    if not hasattr(g, 'db_session'):
-        g.db_session = _connect_db()
-    return g.db_session
+    top = _app_ctx_stack.top
+    if not hasattr(top, 'db_session'):
+        top.db_session = _connect_db()
+    return top.db_session
 
+# @app.teardown_appcontext
+# def close_database(exception):
+#     # todo: explicitly close db connection on app teardown
+#     app.logger.warning("close database unimplemented")
 
 # session = connect_db()
