@@ -46,6 +46,7 @@ from capp import csrf
 G_CLIENT_ID = json.loads(
     open('client_secrets.json', 'r').read())['web']['client_id']
 
+NUM_RECENT_ITEMS=9
 
 def login_required(f):
     @wraps(f)
@@ -230,8 +231,8 @@ def logout():
 @app.route('/')
 def home():
     categories = get_db().query(Category).all()
-    # todo: most recent
-    items = get_db().query(Item).order_by(desc(Item.last_update))
+    items = get_db().query(
+        Item).order_by(desc(Item.last_update)).limit(NUM_RECENT_ITEMS)
     return render_template('home.html',
                            session=login_session,
                            categories=categories,
@@ -248,11 +249,14 @@ def item_new():
                 Item(), request.form,
                 user_id=login_session.get('user_id'))
         except ValueError as e:
-            return "Database validation error: " + str(e)
+            app.logger.exception(e)
+            return render_template('err.html',
+                                   err_msg="Database validation error")
         except SQLAlchemyError as e:
-            # todo: log error, but don't display detailed message
-            # for security reasons
-            return "Database error: " + str(e)
+            app.logger.exception(e)
+            # todo: reinitialize db connection if necessary
+            return render_template('err.html',
+                                   err_msg="Database error")
         # store image file
         file_storage_err = vh.store_item_pic(
             item, request.files['picture'])
@@ -290,9 +294,10 @@ def item_edit(item_title):
         except ValueError as e:
             return "Database validation error: " + str(e)
         except SQLAlchemyError as e:
-            # todo: log error, but don't display detailed message
-            # for security reasons
-            return "Database error: " + str(e)
+            app.logger.exception(e)
+            # todo: reinitialize db connection if necessary
+            return render_template('err.html',
+                                   err_msg="Database error")
         return redirect(url_for('home'))
     else:
         form = vh.get_item_form()(obj=item)
@@ -339,7 +344,6 @@ def items_list(category_name):
 
 @app.route('/catalog/<string:category_name>/<string:item_title>')
 def item_detail(category_name, item_title):
-    # todo: 404 on error from .one()
     category = get_db().query(Category).filter_by(
         name=category_name).one()
     item = get_db().query(Item).filter_by(
