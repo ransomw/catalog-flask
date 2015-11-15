@@ -3,6 +3,8 @@ authorization module
 (currently not very modular)
 """
 
+from pdb import set_trace as st
+
 # python standard library
 import json
 import random
@@ -22,6 +24,7 @@ from flask import Blueprint
 from flask import make_response
 from flask import request
 from flask import current_app
+from flask import g
 
 from sqlalchemy.orm.exc import NoResultFound
 
@@ -44,9 +47,49 @@ from capp import csrf
 G_CLIENT_ID = json.loads(
     open('client_secrets.json', 'r').read())['web']['client_id']
 
-# XXX replace 'auth_views' with __name__
-bp_auth = Blueprint('auth', __name__,
-                    template_folder='templates')
+
+class AuthBlueprint(Blueprint):
+
+    def __init__(self, *args, **kwargs):
+        self._home_url = '/'
+        self._home_view = None
+        super(AuthBlueprint, self).__init__(*args, **kwargs)
+
+    def register(self, app, options, first_registration=False):
+
+        @app.before_request
+        def before_request():
+            g.user = None
+            if 'user_id' in login_session:
+                g.user = get_db().query(User).filter_by(
+                    id=login_session.get('user_id')).one()
+
+        super(AuthBlueprint, self).register(
+            app, options, first_registration)
+
+    @property
+    def home_view(self):
+        return self._home_view
+
+    @home_view.setter
+    def home_view(self, val):
+        # # throw an error if the view doesn't exist
+        # # ... maybe this isn't the desired behavior?
+        # url_for(val)
+        # # ... attempting to generate url w/o app ctx "pushed" error
+        self._home_view = val
+
+    @property
+    def home_url(self):
+        if self._home_view is not None:
+            return url_for(self._home_view)
+        else:
+            return self._home_url
+
+
+bp_auth = AuthBlueprint('auth', __name__,
+                        template_folder='templates')
+
 
 def login_required(f):
     @wraps(f)
@@ -107,8 +150,7 @@ def login():
             user = get_db().query(User).filter_by(
                 email=request.form.get('email')).one()
             login_session['user_id'] = user.id
-        # todo: use generic name for home view
-        return redirect(url_for('catalog.home'))
+        return redirect(bp_auth.home_url)
     else:
         # request.method != 'POST'
         state = ''.join(
@@ -172,8 +214,7 @@ def login_github():
     # todo: error if name and email not present
     user_id = vh.get_create_user(info_json['name'], info_json['email'])
     login_session['user_id'] = user_id
-    # todo: use generic name for home view
-    return redirect(url_for('catalog.home'))
+    return redirect(bp_auth.home_url)
 
 
 # todo: possible to remove csrf.exempt from google login endpoint?
@@ -238,5 +279,4 @@ def gconnect():
 def logout():
     if login_session.get('user_id'):
         login_session.pop('user_id')
-    # todo: use generic name for home view
-    return redirect(url_for('catalog.home'))
+    return redirect(bp_auth.home_url)

@@ -28,7 +28,6 @@ Base = declarative_base()
 
 class User(Base):
     __tablename__ = 'user'
-
     id = Column(Integer, primary_key=True)
     name = Column(String(250), nullable=False)
     email = Column(String(250), nullable=False, unique=True)
@@ -87,16 +86,17 @@ class Item(Base):
             'title': self.title,
         }
 
+
 def _connect_db():
     """ return a new sqlalchemy session """
     engine = create_engine(
         'sqlite:///' + current_app.config['DATABASE'])
     Base.metadata.create_all(engine)
-    # todo: what happens when session
-    #       gets disconnected or has a transaction to be rolled back?
+    # todo: db disconnect or transaction to be roll back?
     Base.metadata.bind = engine
     DBSession = sessionmaker(bind=engine)
     return DBSession()
+
 
 def get_db():
     top = _app_ctx_stack.top
@@ -104,9 +104,7 @@ def get_db():
         top.db_session = _connect_db()
     return top.db_session
 
-# @app.teardown_appcontext
-# def close_database(exception):
-#     # todo: explicitly close db connection on app teardown
-#     app.logger.warning("close database unimplemented")
 
-# session = connect_db()
+@app.teardown_appcontext
+def close_database(exception):
+    get_db().close()
