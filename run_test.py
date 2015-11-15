@@ -171,6 +171,14 @@ class NoLoginTests(NavMixin, CatsMixin, BaseTestCase):
             self.assertFalse(page.has_edit_link())
             self.assertFalse(page.has_delete_link())
 
+    def test_json_xml(self):
+        json_resp = self.c.get('/catalog.json')
+        self.assertEqual(json_resp.status_code, 200)
+        xml_resp = self.c.get('/catalog.xml')
+        self.assertEqual(xml_resp.status_code, 200)
+
+
+
 # todo: test g+ and github logins
 #       consider defining all functionality in terms of mixins,
 #       one for each type of login and one for the tests,

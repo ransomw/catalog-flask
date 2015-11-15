@@ -20,6 +20,8 @@ from flask import url_for
 from flask import jsonify
 from flask import send_file
 from flask import g
+from flask import Blueprint
+from flask import current_app
 
 from sqlalchemy import asc
 from sqlalchemy import desc
@@ -51,16 +53,20 @@ NUM_RECENT_ITEMS = 9
 
 # todo: currently have urls like Soccer%20Cleats, which is ugly
 
+# XXX replace 'auth_views' with __name__
+bp_auth = Blueprint('auth', 'auth_views',
+                    template_folder='templates')
+
 def login_required(f):
     @wraps(f)
     def decorated_function(*args, **kwargs):
         if 'user_id' not in login_session:
-            return redirect(url_for('login', next=request.url))
+            return redirect(url_for('auth.login', next=request.url))
         return f(*args, **kwargs)
     return decorated_function
 
 
-@app.route('/login', methods=['GET', 'POST'])
+@bp_auth.route('/login', methods=['GET', 'POST'])
 def login():
     if request.method == 'POST':
         if request.form.get('sign-in') is not None:
@@ -82,19 +88,17 @@ def login():
                                    request.form.get('password')):
                 login_session['user_id'] = user.id
             else:
-                return render_template(
-                    'err.html', err_msg="bad password"), 401
+                # todo: use a template
+                return "bad password", 401
         else:
             # request.form.get('sign-in') is None
             if request.form.get('sign-up') is None:
-                err_msg = "must specify sign up or sign in"
-                return render_template(
-                    'err.html', err_msg=err_msg), 400
+                # todo: use a template
+                return "must specify sign up or sign in", 400
             if ((request.form.get('password') !=
                  request.form.get('password-confirm'))):
-                err_msg = "passwords don't match"
-                return render_template(
-                    'err.html', err_msg=err_msg), 400
+                # todo: use a template
+                return "passwords don't match", 400
             try:
                 user = get_db().query(User).filter_by(
                     email=request.form.get('email')).one()
@@ -112,7 +116,8 @@ def login():
             user = get_db().query(User).filter_by(
                 email=request.form.get('email')).one()
             login_session['user_id'] = user.id
-        return redirect(url_for('home'))
+        # todo: use generic name for home view
+        return redirect(url_for('catalog.home'))
     else:
         # request.method != 'POST'
         state = ''.join(
@@ -123,7 +128,7 @@ def login():
             'login.html',
             state=state,
             G_CLIENT_ID=G_CLIENT_ID,
-            GH_CLIENT_ID=app.config['GITHUB_CLIENT_ID'])
+            GH_CLIENT_ID=current_app.config['GITHUB_CLIENT_ID'])
 
 
 # disable for production, used only for dev w/o internet connection
@@ -133,7 +138,7 @@ def login():
 #     return redirect(url_for('home'))
 
 
-@app.route('/login/github')
+@bp_auth.route('/login/github')
 def login_github():
     # check random state string
     if request.args.get('state') != login_session['state']:
@@ -176,9 +181,11 @@ def login_github():
     # todo: error if name and email not present
     user_id = vh.get_create_user(info_json['name'], info_json['email'])
     login_session['user_id'] = user_id
-    return redirect(url_for('home'))
+    # todo: use generic name for home view
+    return redirect(url_for('catalog.home'))
 
 
+# todo: possible to remove csrf.exempt from google login endpoint?
 @csrf.exempt
 @app.route('/gconnect', methods=['POST'])
 def gconnect():
@@ -236,13 +243,18 @@ def gconnect():
     return 'logged in'
 
 
-@app.route('/logout')
+@bp_auth.route('/logout')
 def logout():
     if login_session.get('user_id'):
         login_session.pop('user_id')
-    return redirect(url_for('home'))
+    # todo: use generic name for home view
+    return redirect(url_for('catalog.home'))
 
 
+app.register_blueprint(bp_auth)
+
+
+# todo: only the blueprint need know about before_request
 @app.before_request
 def before_request():
     g.user = None
@@ -251,7 +263,12 @@ def before_request():
             id=login_session.get('user_id')).one()
 
 
-@app.route('/')
+# XXX replace 'catalog_views' with __name__
+bp_catalog = Blueprint('catalog', 'catalog_views',
+                       template_folder='templates')
+
+
+@bp_catalog.route('/')
 def home():
     categories = get_db().query(Category).all()
     items = get_db().query(
@@ -261,7 +278,7 @@ def home():
                            items=items)
 
 
-@app.route('/catalog/item/new', methods=['GET', 'POST'])
+@bp_catalog.route('/catalog/item/new', methods=['GET', 'POST'])
 @login_required
 def item_new():
     if request.method == 'POST':
@@ -271,11 +288,11 @@ def item_new():
                                      user_id=g.user.id)
         except ValueError as e:
             # client-side validation should prevent this
-            app.logger.exception(e)
+            current_app.logger.exception(e)
             return render_template('err.html',
                                    err_msg="Database validation error")
         except SQLAlchemyError as e:
-            app.logger.exception(e)
+            current_app.logger.exception(e)
             # todo: reinitialize db connection if necessary
             return render_template('err.html',
                                    err_msg="Database error")
@@ -288,14 +305,15 @@ def item_new():
             get_db().delete(item)
             return render_template(
                 'err.html', err_msg=file_storage_err), 500
-        return redirect(url_for('home'))
+        return redirect(url_for('.home'))
     else:
         categories = get_db().query(Category).all()
         return render_template('item_add.html',
                                categories=categories)
 
 
-@app.route('/catalog/<string:item_title>/edit', methods=['GET', 'POST'])
+@bp_catalog.route('/catalog/<string:item_title>/edit',
+                  methods=['GET', 'POST'])
 @login_required
 def item_edit(item_title):
     try:
@@ -326,15 +344,15 @@ def item_edit(item_title):
             # todo: pic updated w/o updating item record
         except ValueError as e:
             # client-side validation should prevent this
-            app.logger.exception(e)
+            current_app.logger.exception(e)
             return render_template('err.html',
                                    err_msg="Database validation error")
         except SQLAlchemyError as e:
-            app.logger.exception(e)
+            current_app.logger.exception(e)
             # todo: reinitialize db connection if necessary
             return render_template('err.html',
                                    err_msg="Database error")
-        return redirect(url_for('home'))
+        return redirect(url_for('.home'))
     else:
         form = vh.get_item_form()(obj=item)
         return render_template('item_edit.html',
@@ -342,7 +360,7 @@ def item_edit(item_title):
                                file_err=None)
 
 
-@app.route('/catalog/<string:item_title>/delete',
+@bp_catalog.route('/catalog/<string:item_title>/delete',
            methods=['GET', 'POST'])
 @login_required
 def item_delete(item_title):
@@ -354,7 +372,7 @@ def item_delete(item_title):
         return render_template(
             'err.html', err_msg=err_msg), 404
     if item.user is not None and item.user.id != g.user.id:
-        return redirect(url_for('home'))
+        return redirect(url_for('.home'))
     if request.method == 'POST':
         img_filepath = vh.get_item_image_filepath(item.id)
         # todo: error-handling, filesystem/db consistency story as w/ C&U
@@ -362,13 +380,13 @@ def item_delete(item_title):
             os.remove(img_filepath)
         get_db().delete(item)
         get_db().commit()
-        return redirect(url_for('home'))
+        return redirect(url_for('.home'))
     else:
         return render_template('item_delete.html',
                                item=item)
 
 
-@app.route('/catalog/<string:category_name>/items')
+@bp_catalog.route('/catalog/<string:category_name>/items')
 def items_list(category_name):
     try:
         category = get_db().query(Category).filter_by(
@@ -386,7 +404,7 @@ def items_list(category_name):
                            items=items)
 
 
-@app.route('/catalog/<string:category_name>/<string:item_title>')
+@bp_catalog.route('/catalog/<string:category_name>/<string:item_title>')
 def item_detail(category_name, item_title):
     try:
         category = get_db().query(Category).filter_by(
@@ -409,7 +427,7 @@ def item_detail(category_name, item_title):
                            rand_q=time.time())
 
 
-@app.route('/catalog/item/<int:item_id>/img')
+@bp_catalog.route('/catalog/item/<int:item_id>/img')
 def item_img(item_id):
     try:
         item = get_db().query(Item).filter_by(
@@ -418,33 +436,44 @@ def item_img(item_id):
         return json.dumps('Image not found'), 401
     img_info = vh.get_item_image_info(item.id)
     if img_info is None:
-        app.logger.exception("got None for img_info")
+        current_app.logger.exception("got None for img_info")
         return json.dumps("programming or operation error"), 500
     # todo: edit out this '..' nonsense after tests for file uploading
     return send_file(os.path.join('..', img_info['path']),
                      mimetype='image/'+img_info['type'])
 
 
-@app.route('/api/category')
+@bp_catalog.route('/api/category')
 def api_categories():
     categories = get_db().query(Category).all()
     return jsonify(Categories=[c.serialize for c in categories])
 
 
-@app.route('/api/item')
+@bp_catalog.route('/api/item')
 def api_items():
     items = get_db().query(Item).all()
     return jsonify(Items=[i.serialize for i in items])
 
+app.register_blueprint(bp_catalog)
 
-@app.route('/catalog.json')
+
+# XXX replace 'api_views' with __name__
+bp_api = Blueprint('api', 'api_views',
+                    template_folder='templates')
+
+
+# todo: query strings for json and xml responses
+# todo: generic view to handle both json and xml responses
+@bp_api.route('/catalog.json')
 def json_catalog():
     return jsonify(vh.serialize_catalog())
 
 
-@app.route('/catalog.xml')
+@bp_api.route('/catalog.xml')
 def xml_catalog():
     xml = dict2xml(vh.serialize_catalog(), wrap="Catalog")
     response = make_response(xml)
     response.headers['Content-Type'] = 'application/xml'
     return response
+
+app.register_blueprint(bp_api)

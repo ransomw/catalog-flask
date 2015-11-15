@@ -19,6 +19,7 @@ from sqlalchemy import create_engine
 
 # despite underscore, this is a documented instance
 from flask import _app_ctx_stack
+from flask import current_app
 
 from capp import app
 
@@ -89,7 +90,7 @@ class Item(Base):
 def _connect_db():
     """ return a new sqlalchemy session """
     engine = create_engine(
-        'sqlite:///' + app.config['DATABASE'])
+        'sqlite:///' + current_app.config['DATABASE'])
     Base.metadata.create_all(engine)
     # todo: what happens when session
     #       gets disconnected or has a transaction to be rolled back?
