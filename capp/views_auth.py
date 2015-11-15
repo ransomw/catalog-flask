@@ -61,8 +61,13 @@ class AuthBlueprint(Blueprint):
         def before_request():
             g.user = None
             if 'user_id' in login_session:
-                g.user = get_db().query(User).filter_by(
-                    id=login_session.get('user_id')).one()
+                try:
+                    g.user = get_db().query(User).filter_by(
+                        id=login_session.get('user_id')).one()
+                except NoResultFound:
+                    current_app.logger.warning((
+                        "session with non-existant user id"))
+                    login_session.pop('user_id')
 
         super(AuthBlueprint, self).register(
             app, options, first_registration)
